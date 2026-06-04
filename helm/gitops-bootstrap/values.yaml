@@ -1,0 +1,15 @@
+# Git repository containing this multicluster-poc folder (required for Argo CD Applications).
+git:
+  repoURL: ""
+  revision: main
+  # Set to "hub" or "client" when installing Applications
+  clusterRole: client
+
+openshiftGitOps:
+  namespace: openshift-gitops
+  operatorNamespace: openshift-operators
+  channel: latest
+
+argocd:
+  namespace: openshift-gitops
+  project: default

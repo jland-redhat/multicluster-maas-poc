@@ -1,0 +1,18 @@
+# TCP passthrough Route — clients connect to host:443 with sslmode=disable.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: postgres-hub
+  labels:
+    app: postgres
+    app.kubernetes.io/part-of: maas-multicluster-poc
+spec:
+  to:
+    kind: Service
+    name: postgres
+    weight: 100
+  port:
+    targetPort: postgres
+  tls:
+    termination: passthrough
+  wildcardPolicy: None

@@ -1,0 +1,22 @@
+{{- if and (eq .Values.git.clusterRole "hub") .Values.git.repoURL }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: maas-poc-hub-postgres
+  namespace: {{ .Values.argocd.namespace }}
+spec:
+  project: {{ .Values.argocd.project }}
+  source:
+    repoURL: {{ .Values.git.repoURL | quote }}
+    targetRevision: {{ .Values.git.revision | quote }}
+    path: multicluster-poc/kustomize/hub/postgres
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: redhat-ods-applications
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+{{- end }}

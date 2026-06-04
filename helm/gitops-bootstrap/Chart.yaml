@@ -1,0 +1,6 @@
+apiVersion: v2
+name: gitops-bootstrap
+description: Install OpenShift GitOps operator for the MaaS multicluster PoC
+type: application
+version: 0.1.0
+appVersion: "1.0"

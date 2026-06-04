@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - free-llm-inferenceservice.yaml
+  - free-maas-resources.yaml
+  - premium-llm-inferenceservice.yaml
+  - premium-maas-resources.yaml

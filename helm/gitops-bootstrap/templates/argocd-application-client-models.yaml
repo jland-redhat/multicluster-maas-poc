@@ -1,0 +1,21 @@
+{{- if and (eq .Values.git.clusterRole "client") .Values.git.repoURL }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: maas-poc-client-models
+  namespace: {{ .Values.argocd.namespace }}
+spec:
+  project: {{ .Values.argocd.project }}
+  source:
+    repoURL: {{ .Values.git.repoURL | quote }}
+    targetRevision: {{ .Values.git.revision | quote }}
+    path: multicluster-poc/kustomize/client/models
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+{{- end }}

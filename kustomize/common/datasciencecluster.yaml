@@ -1,0 +1,29 @@
+# RHOAI 3.4 — enable MaaS via operator (modelsAsService).
+# Apply after maas-db-config Secret and maas-default-gateway exist.
+apiVersion: datasciencecluster.opendatahub.io/v2
+kind: DataScienceCluster
+metadata:
+  name: default-dsc
+spec:
+  components:
+    kserve:
+      managementState: Managed
+      rawDeploymentServiceConfig: Headed
+      modelsAsService:
+        managementState: Managed
+    dashboard:
+      managementState: Removed
+    workbenches:
+      managementState: Removed
+    datasciencepipelines:
+      managementState: Removed
+    modelregistry:
+      managementState: Removed
+    trainingoperator:
+      managementState: Removed
+    trustyai:
+      managementState: Removed
+    kueue:
+      managementState: Removed
+    ray:
+      managementState: Removed
