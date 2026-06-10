@@ -14,6 +14,7 @@ Usage: enable-maas.sh [--kubeconfig PATH]
 
 Prerequisites:
   - RHOAI operator installed (install-rhoai.sh)
+  - RHCL + cert-manager installed (install-rhcl.sh)
   - maas-db-config Secret in redhat-ods-applications
   - maas-default-gateway Programmed (setup-gateway.sh)
 EOF

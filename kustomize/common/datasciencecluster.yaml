@@ -12,7 +12,7 @@ spec:
       modelsAsService:
         managementState: Managed
     dashboard:
-      managementState: Removed
+      managementState: Managed
     workbenches:
       managementState: Removed
     datasciencepipelines:

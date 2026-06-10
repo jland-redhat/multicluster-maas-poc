@@ -2,12 +2,14 @@
 # Shared helpers for multicluster-poc scripts.
 set -euo pipefail
 
-POC_ROOT="$(cd "$(dirname "${BASH_SOURCE[1]}")/.." && pwd)"
-MAAS_REPO_ROOT="$(cd "${POC_ROOT}/.." && pwd)"
+POC_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 APP_NAMESPACE="${APP_NAMESPACE:-redhat-ods-applications}"
-AUTHORINO_NAMESPACE="${AUTHORINO_NAMESPACE:-rh-connectivity-link}"
+AUTHORINO_NAMESPACE="${AUTHORINO_NAMESPACE:-kuadrant-system}"
+RHCL_NAMESPACE="${RHCL_NAMESPACE:-kuadrant-system}"
 GATEWAY_NAMESPACE="${GATEWAY_NAMESPACE:-openshift-ingress}"
+DEFAULT_GIT_REPO="${DEFAULT_GIT_REPO:-https://github.com/jland-redhat/multicluster-maas-poc.git}"
+DEFAULT_GIT_REVISION="${DEFAULT_GIT_REVISION:-main}"
 
 log() { printf '[multicluster-poc] %s\n' "$*"; }
 warn() { printf '[multicluster-poc] WARN: %s\n' "$*" >&2; }
@@ -40,7 +42,23 @@ wait_for_deployment() {
   local name=$1
   local ns=$2
   local timeout=${3:-300}
-  oc wait --for=condition=Available "deployment/${name}" -n "${ns}" --timeout="${timeout}s"
+  local deadline=$((SECONDS + timeout))
+  local logged=false
+
+  while ! oc get "deployment/${name}" -n "${ns}" >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      die "deployment/${name} not found in ${ns} after ${timeout}s"
+    fi
+    if [[ "${logged}" == false ]]; then
+      log "Waiting for deployment/${name} to appear in ${ns}..."
+      logged=true
+    fi
+    sleep 5
+  done
+
+  local remaining=$((deadline - SECONDS))
+  (( remaining < 1 )) && remaining=1
+  oc wait --for=condition=Available "deployment/${name}" -n "${ns}" --timeout="${remaining}s"
 }
 
 wait_for_gateway() {

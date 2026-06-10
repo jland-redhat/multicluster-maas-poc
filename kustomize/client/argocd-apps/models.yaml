@@ -1,0 +1,19 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: maas-poc-models
+  namespace: openshift-gitops
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/jland-redhat/multicluster-maas-poc.git
+    targetRevision: main
+    path: kustomize/common/models
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

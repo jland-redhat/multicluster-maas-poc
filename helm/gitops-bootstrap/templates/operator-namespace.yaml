@@ -3,4 +3,6 @@ kind: OperatorGroup
 metadata:
   name: openshift-gitops-operator-group
   namespace: {{ .Values.openshiftGitOps.operatorNamespace }}
-spec: {}
+spec:
+  targetNamespaces:
+    - {{ .Values.openshiftGitOps.operatorNamespace }}

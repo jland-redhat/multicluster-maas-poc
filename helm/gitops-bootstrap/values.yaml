@@ -1,13 +1,15 @@
-# Git repository containing this multicluster-poc folder (required for Argo CD Applications).
+# Git repository root (required for Argo CD Applications).
 git:
-  repoURL: ""
+  repoURL: https://github.com/jland-redhat/multicluster-maas-poc.git
   revision: main
   # Set to "hub" or "client" when installing Applications
   clusterRole: client
 
 openshiftGitOps:
   namespace: openshift-gitops
-  operatorNamespace: openshift-operators
+  # Dedicated operator namespace — do not use openshift-operators/global-operators
+  # (shared OG merges InstallPlans with other Manual subscriptions e.g. Service Mesh).
+  operatorNamespace: openshift-gitops-operator
   channel: latest
 
 argocd:

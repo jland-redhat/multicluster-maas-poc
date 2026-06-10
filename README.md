@@ -4,8 +4,8 @@ Proof-of-concept for **shared API key storage** across three OpenShift clusters 
 
 | Cluster | Role |
 |---------|------|
-| **hub** | PostgreSQL + key minting (no models) |
-| **client1**, **client2** | Inference + validation-only maas-api, shared hub DB |
+| **hub** | PostgreSQL + key minting + same simulator models/subscriptions as clients |
+| **client1**, **client2** | Inference + validation-only maas-api, shared hub DB, key-mgmt blocked |
 
 **What this proves:** mint an API key on the hub → use it for inference on client clusters when subscription names match.
 
@@ -78,10 +78,15 @@ Without `--git-repo`, apply manifests directly with the scripts below.
 ### Phase 1 — Hub only
 
 ```bash
+./scripts/install-rhcl.sh --kubeconfig "${HUB_KUBECONFIG}"
 ./scripts/apply-hub-postgres.sh --kubeconfig "${HUB_KUBECONFIG}"
 ./scripts/setup-gateway.sh --kubeconfig "${HUB_KUBECONFIG}"
 ./scripts/enable-maas.sh --kubeconfig "${HUB_KUBECONFIG}"
+./scripts/apply-models.sh --kubeconfig "${HUB_KUBECONFIG}"
 ```
+
+Argo CD Applications (`maas-poc-hub-postgres`, `maas-poc-models`) are created automatically
+when using `install-hub.sh` or `bootstrap-gitops.sh` (default git repo is this project).
 
 ### Phase 2 — Each client
 
@@ -92,7 +97,7 @@ Without `--git-repo`, apply manifests directly with the scripts below.
   --client-kubeconfig "${CLIENT_KUBECONFIG}" \
   --test-connection
 ./scripts/enable-maas.sh --kubeconfig "${CLIENT_KUBECONFIG}"
-./scripts/apply-client-models.sh --kubeconfig "${CLIENT_KUBECONFIG}"
+./scripts/apply-models.sh --kubeconfig "${CLIENT_KUBECONFIG}"
 ./scripts/disable-key-management.sh --kubeconfig "${CLIENT_KUBECONFIG}"
 ```
 
