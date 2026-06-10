@@ -11,10 +11,10 @@ spec:
     path: kustomize/hub/postgres
   destination:
     server: https://kubernetes.default.svc
-    namespace: redhat-ods-applications
+    namespace: postgres
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=false
+      - CreateNamespace=true

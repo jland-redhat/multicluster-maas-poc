@@ -74,12 +74,38 @@ if oc get subscription "${GITOPS_SUB}" -n "${LEGACY_GITOPS_NS}" >/dev/null 2>&1;
 fi
 
 log "Installing OpenShift GitOps operator via Helm..."
-helm upgrade --install maas-poc-gitops "${POC_ROOT}/helm/gitops-bootstrap" \
-  --namespace "${GITOPS_HELM_NS}" \
-  --create-namespace \
-  --set "git.clusterRole=${HELM_ROLE}" \
-  --set "git.repoURL=${GIT_REPO}" \
-  --set "git.revision=${GIT_REVISION}"
+helm_gitops() {
+  local deploy_apps=$1
+  helm upgrade --install maas-poc-gitops "${POC_ROOT}/helm/gitops-bootstrap" \
+    --namespace "${GITOPS_HELM_NS}" \
+    --create-namespace \
+    --set "git.clusterRole=${HELM_ROLE}" \
+    --set "git.repoURL=${GIT_REPO}" \
+    --set "git.revision=${GIT_REVISION}" \
+    --set "git.deployApplications=${deploy_apps}"
+}
+
+# Phase 1: operator Subscription only (Application CRD does not exist yet).
+helm_gitops false
+
+# A prior chart version scoped the OG to its own namespace (OwnNamespace), which GitOps rejects.
+recover_gitops_operator() {
+  local csv phase reason
+  csv="$(oc get csv -n "${GITOPS_OPERATOR_NS}" -o jsonpath='{range .items[?(@.spec.displayName=="Red Hat OpenShift GitOps")]}{.metadata.name}{"\n"}{end}' 2>/dev/null | head -1 || true)"
+  [[ -n "${csv}" ]] || return 0
+  phase="$(oc get "csv/${csv}" -n "${GITOPS_OPERATOR_NS}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  reason="$(oc get "csv/${csv}" -n "${GITOPS_OPERATOR_NS}" -o jsonpath='{.status.reason}' 2>/dev/null || true)"
+  if [[ "${phase}" == "Failed" && "${reason}" == "UnsupportedOperatorGroup" ]]; then
+    warn "Removing failed GitOps CSV (${reason}); retrying after OperatorGroup fix."
+    oc delete "csv/${csv}" -n "${GITOPS_OPERATOR_NS}" --wait=true
+    while IFS= read -r ip; do
+      [[ -n "${ip}" ]] || continue
+      oc delete installplan "${ip}" -n "${GITOPS_OPERATOR_NS}" --wait=true 2>/dev/null || true
+    done < <(oc get installplan -n "${GITOPS_OPERATOR_NS}" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+  fi
+}
+
+recover_gitops_operator
 
 log "Waiting for OpenShift GitOps subscription..."
 if ! oc wait --for=jsonpath='{.status.state}'=AtLatestKnown \
@@ -88,20 +114,21 @@ if ! oc wait --for=jsonpath='{.status.state}'=AtLatestKnown \
   die "OpenShift GitOps subscription did not reach AtLatestKnown — check: oc get subscription,installplan -n ${GITOPS_OPERATOR_NS}"
 fi
 
+log "Waiting for OpenShift GitOps CSV..."
+GITOPS_CSV="$(oc get subscription "${GITOPS_SUB}" -n "${GITOPS_OPERATOR_NS}" -o jsonpath='{.status.currentCSV}')"
+[[ -n "${GITOPS_CSV}" ]] || die "subscription has no currentCSV yet"
+wait_for_csv "${GITOPS_CSV}" "${GITOPS_OPERATOR_NS}" 600
+
 log "Waiting for openshift-gitops Argo CD server..."
-for _ in $(seq 1 60); do
-  if oc get deployment openshift-gitops-server -n openshift-gitops >/dev/null 2>&1; then
-    break
-  fi
-  sleep 10
-done
-wait_for_deployment openshift-gitops-server openshift-gitops 600 || \
-  warn "openshift-gitops-server not ready — check operator status"
+wait_for_deployment openshift-gitops-server openshift-gitops 600
 
 if [[ "${SKIP_APPS}" == true ]]; then
   warn "Skipping Argo CD Applications (--skip-apps set)."
   warn "Apply manifests with apply-hub-postgres.sh / apply-models.sh instead."
 else
+  wait_for_crd applications.argoproj.io 600
+  log "Creating Argo CD Applications..."
+  helm_gitops true
   log "Argo CD Applications configured for ${HELM_ROLE} cluster (repo=${GIT_REPO})."
   log "  Hub: maas-poc-hub-postgres, maas-poc-models"
   log "  Client: maas-poc-models"

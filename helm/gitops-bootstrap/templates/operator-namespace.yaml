@@ -4,5 +4,5 @@ metadata:
   name: openshift-gitops-operator-group
   namespace: {{ .Values.openshiftGitOps.operatorNamespace }}
 spec:
-  targetNamespaces:
-    - {{ .Values.openshiftGitOps.operatorNamespace }}
+  # AllNamespaces — GitOps does not support OwnNamespace (targetNamespaces: [this-ns]).
+  upgradeStrategy: Default

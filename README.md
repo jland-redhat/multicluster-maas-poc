@@ -20,38 +20,98 @@ See [SPEC.md](SPEC.md) for design decisions.
 - Three blank OpenShift clusters (RHOAI 3.4 compatible — OCP 4.16+)
 - `oc`, `helm`, `kustomize`, `jq`, `curl` on your workstation
 - Cluster-admin on each cluster
-- This repo checked out (scripts call `../scripts/setup-gateway.sh` in the parent maas-billing tree)
+- This repo cloned locally
 - Client clusters can reach the hub **postgres-hub** Route on port **443**
 
 ---
 
 ## Quick start (orchestrated)
 
+Each cluster gets its own kubeconfig file under `/tmp`. Log in with the API token from the
+OpenShift console (**Copy login command**), then run the install script for that cluster.
+
 ```bash
 cd multicluster-poc
+```
 
-# 1. Hub
-export HUB_KUBECONFIG=/path/to/hub/kubeconfig
+### 1. Hub
+
+```bash
+mkdir -p /tmp/hub
+export HUB_KUBECONFIG=/tmp/hub/kubeconfig
+
+oc login \
+  --token=sha256~YOUR_HUB_TOKEN \
+  --server=https://api.YOUR_HUB_CLUSTER.p3.openshiftapps.com:443 \
+  --kubeconfig="${HUB_KUBECONFIG}"
+
 ./scripts/install-hub.sh --kubeconfig "${HUB_KUBECONFIG}"
+```
 
-# 2. Client 1
-export CLIENT1_KUBECONFIG=/path/to/client1/kubeconfig
+This installs RHOAI, RHCL, GitOps (with Argo apps), Postgres, gateway, MaaS, and the
+simulator models/subscriptions. Expect **30–60+ minutes** on a fresh cluster.
+
+### 2. Client 1
+
+Switch to the client cluster token and server. Keep `HUB_KUBECONFIG` from step 1 — the
+client install reads the hub Postgres Route from it.
+
+```bash
+mkdir -p /tmp/client1
+export CLIENT1_KUBECONFIG=/tmp/client1/kubeconfig
+
+oc login \
+  --token=sha256~YOUR_CLIENT1_TOKEN \
+  --server=https://api.client-1.072j.p3.openshiftapps.com:443 \
+  --kubeconfig="${CLIENT1_KUBECONFIG}"
+
 ./scripts/install-client.sh \
   --kubeconfig "${CLIENT1_KUBECONFIG}" \
   --hub-kubeconfig "${HUB_KUBECONFIG}" \
   --cluster client1
+```
 
-# 3. Client 2
-export CLIENT2_KUBECONFIG=/path/to/client2/kubeconfig
+### 3. Client 2 (optional)
+
+```bash
+mkdir -p /tmp/client2
+export CLIENT2_KUBECONFIG=/tmp/client2/kubeconfig
+
+oc login \
+  --token=sha256~YOUR_CLIENT2_TOKEN \
+  --server=https://api.YOUR_CLIENT2_CLUSTER.p3.openshiftapps.com:443 \
+  --kubeconfig="${CLIENT2_KUBECONFIG}"
+
 ./scripts/install-client.sh \
   --kubeconfig "${CLIENT2_KUBECONFIG}" \
   --hub-kubeconfig "${HUB_KUBECONFIG}" \
   --cluster client2
+```
 
-# 4. Validate
+### 4. Validate
+
+```bash
 ./scripts/validate-poc.sh \
   --hub-kubeconfig "${HUB_KUBECONFIG}" \
   --client-kubeconfig "${CLIENT1_KUBECONFIG}"
+```
+
+### Day-2 commands (single cluster)
+
+After login, point `oc` at the kubeconfig you care about:
+
+```bash
+export KUBECONFIG="${HUB_KUBECONFIG}"    # or CLIENT1_KUBECONFIG
+oc whoami
+oc get maassubscription,maasmodelref -A
+oc get applications -n openshift-gitops
+```
+
+Re-run a failed step without redoing the full install, for example:
+
+```bash
+./scripts/setup-gateway.sh --kubeconfig "${HUB_KUBECONFIG}"
+./scripts/apply-models.sh --kubeconfig "${CLIENT1_KUBECONFIG}"
 ```
 
 ---
@@ -66,14 +126,11 @@ Run on each cluster unless noted.
 ./scripts/install-rhoai.sh --kubeconfig "${KUBECONFIG}"
 ```
 
-Optional GitOps (requires a git remote containing this folder):
+Optional GitOps (enabled by default in `install-hub.sh` / `install-client.sh`):
 
 ```bash
-./scripts/bootstrap-gitops.sh --cluster hub --kubeconfig "${KUBECONFIG}" \
-  --git-repo https://github.com/YOUR_ORG/maas-billing
+./scripts/bootstrap-gitops.sh --cluster hub --kubeconfig "${HUB_KUBECONFIG}"
 ```
-
-Without `--git-repo`, apply manifests directly with the scripts below.
 
 ### Phase 1 — Hub only
 
@@ -143,7 +200,7 @@ multicluster-poc/
 ├── helm/gitops-bootstrap/     # OpenShift GitOps operator + optional Argo Applications
 ├── kustomize/
 │   ├── hub/postgres/          # Hub DB + Route
-│   ├── client/models/         # Simulator bundles
+│   ├── common/models/         # Simulator bundles (hub + clients)
 │   └── client/disable-key-management/
 ├── samples/                   # Vendored model/MaaS YAML
 └── scripts/                   # Install, sync, validate
@@ -153,7 +210,7 @@ multicluster-poc/
 
 ## Hub PostgreSQL connectivity
 
-- **In-cluster (hub maas-api):** `postgres.redhat-ods-applications.svc:5432`
+- **In-cluster (hub maas-api):** `postgres.postgres.svc:5432`
 - **Cross-cluster (clients):** `postgres-hub` Route hostname, port **443**, TCP passthrough, `sslmode=disable`
 - Default demo password: `maas-poc-demo-change-me` (override in `kustomize/hub/postgres/postgres.yaml` before deploy)
 
@@ -178,14 +235,16 @@ Re-run the script if the operator reconciles and removes the deny policy.
 | maas-api CrashLoop | `maas-db-config` exists; client can reach hub Route:443 |
 | Mint works on client | Re-run `disable-key-management.sh` |
 | Inference 403 | Subscription name on key matches client `MaaSSubscription`; model Ready |
-| Gateway not Programmed | Re-run `setup-gateway.sh`; check RHCL/Authorino in `rh-connectivity-link` |
+| Gateway not Programmed | Re-run `setup-gateway.sh`; check RHCL/Authorino in `kuadrant-system` |
 | RHOAI not ready | `oc get dscinitialization,datasciencecluster` |
 
 ---
 
 ## GitOps note
 
-Argo CD Applications in `helm/gitops-bootstrap` need `git.repoURL` pointing at a remote containing `multicluster-poc/`. Until you push this folder, use the direct `oc apply` scripts.
+Argo CD Applications (`maas-poc-hub-postgres`, `maas-poc-models`) sync from
+[multicluster-maas-poc](https://github.com/jland-redhat/multicluster-maas-poc) on `main`.
+Push manifest changes to GitHub before expecting Argo to pick them up.
 
 ---
 

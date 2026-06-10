@@ -4,11 +4,14 @@ git:
   revision: main
   # Set to "hub" or "client" when installing Applications
   clusterRole: client
+  # Render Argo CD Application CRs only after the GitOps operator is running.
+  deployApplications: false
 
 openshiftGitOps:
   namespace: openshift-gitops
   # Dedicated operator namespace — do not use openshift-operators/global-operators
   # (shared OG merges InstallPlans with other Manual subscriptions e.g. Service Mesh).
+  # OperatorGroup must be AllNamespaces (no targetNamespaces); GitOps rejects OwnNamespace.
   operatorNamespace: openshift-gitops-operator
   channel: latest
 

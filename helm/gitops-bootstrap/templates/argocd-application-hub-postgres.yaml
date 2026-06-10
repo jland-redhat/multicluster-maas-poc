@@ -1,4 +1,4 @@
-{{- if and (eq .Values.git.clusterRole "hub") .Values.git.repoURL }}
+{{- if and (eq .Values.git.clusterRole "hub") .Values.git.repoURL .Values.git.deployApplications }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -12,11 +12,11 @@ spec:
     path: kustomize/hub/postgres
   destination:
     server: https://kubernetes.default.svc
-    namespace: redhat-ods-applications
+    namespace: postgres
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=false
+      - CreateNamespace=true
 {{- end }}

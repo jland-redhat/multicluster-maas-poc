@@ -1,4 +1,4 @@
-{{- if .Values.git.repoURL }}
+{{- if and .Values.git.repoURL .Values.git.deployApplications }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

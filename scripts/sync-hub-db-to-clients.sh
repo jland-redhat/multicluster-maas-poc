@@ -38,9 +38,9 @@ done
 
 log "Reading hub database credentials..."
 HUB_PASS="$(KUBECONFIG="${HUB_KUBECONFIG}" oc get secret postgres-creds \
-  -n "${APP_NAMESPACE}" -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)"
+  -n "${POSTGRES_NAMESPACE}" -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)"
 ROUTE_HOST="$(KUBECONFIG="${HUB_KUBECONFIG}" oc get route postgres-hub \
-  -n "${APP_NAMESPACE}" -o jsonpath='{.spec.host}')"
+  -n "${POSTGRES_NAMESPACE}" -o jsonpath='{.spec.host}')"
 [[ -n "${HUB_PASS}" && -n "${ROUTE_HOST}" ]] \
   || die "hub postgres-creds or postgres-hub Route not found"
 

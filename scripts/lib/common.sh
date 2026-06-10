@@ -5,6 +5,7 @@ set -euo pipefail
 POC_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 APP_NAMESPACE="${APP_NAMESPACE:-redhat-ods-applications}"
+POSTGRES_NAMESPACE="${POSTGRES_NAMESPACE:-postgres}"
 AUTHORINO_NAMESPACE="${AUTHORINO_NAMESPACE:-kuadrant-system}"
 RHCL_NAMESPACE="${RHCL_NAMESPACE:-kuadrant-system}"
 GATEWAY_NAMESPACE="${GATEWAY_NAMESPACE:-openshift-ingress}"
@@ -59,6 +60,19 @@ wait_for_deployment() {
   local remaining=$((deadline - SECONDS))
   (( remaining < 1 )) && remaining=1
   oc wait --for=condition=Available "deployment/${name}" -n "${ns}" --timeout="${remaining}s"
+}
+
+wait_for_crd() {
+  local name=$1
+  local timeout=${2:-600}
+  local deadline=$((SECONDS + timeout))
+  log "Waiting for CRD ${name}..."
+  while ! oc get crd "${name}" >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      die "CRD ${name} not available after ${timeout}s"
+    fi
+    sleep 5
+  done
 }
 
 wait_for_gateway() {

@@ -1,0 +1,32 @@
+# Argo CD application-controller needs explicit RBAC for MaaS / KServe CRs synced by maas-poc-models.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: maas-poc-gitops-argocd-maas-models
+  labels:
+    app.kubernetes.io/managed-by: Helm
+rules:
+  - apiGroups: ["serving.kserve.io"]
+    resources: ["llminferenceservices"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["maas.opendatahub.io"]
+    resources:
+      - maasmodelrefs
+      - maasauthpolicies
+      - maassubscriptions
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: maas-poc-gitops-argocd-maas-models
+  labels:
+    app.kubernetes.io/managed-by: Helm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: maas-poc-gitops-argocd-maas-models
+subjects:
+  - kind: ServiceAccount
+    name: openshift-gitops-argocd-application-controller
+    namespace: {{ .Values.argocd.namespace }}
