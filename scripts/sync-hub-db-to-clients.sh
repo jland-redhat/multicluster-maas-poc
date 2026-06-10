@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copy hub PostgreSQL Route credentials to a client cluster maas-db-config Secret.
+# Copy hub PostgreSQL credentials to a client cluster maas-db-config Secret.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,9 +17,9 @@ Usage: sync-hub-db-to-clients.sh \
          --client-kubeconfig PATH \
          [--test-connection]
 
-Reads postgres-creds and postgres-hub Route from the hub, builds an external
-DB_CONNECTION_URL (Route host:443, sslmode=disable), and applies maas-db-config
-on the client cluster.
+Reads postgres-creds from the hub (postgres namespace, or legacy
+redhat-ods-applications), builds an external DB_CONNECTION_URL from the
+LoadBalancer or postgres-hub Route, and applies maas-db-config on the client.
 EOF
 }
 
@@ -37,17 +37,18 @@ done
   || die "both --hub-kubeconfig and --client-kubeconfig are required"
 
 log "Reading hub database credentials..."
+HUB_PG_NS="$(find_hub_postgres_namespace "${HUB_KUBECONFIG}")"
 HUB_PASS="$(KUBECONFIG="${HUB_KUBECONFIG}" oc get secret postgres-creds \
-  -n "${POSTGRES_NAMESPACE}" -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)"
-ROUTE_HOST="$(KUBECONFIG="${HUB_KUBECONFIG}" oc get route postgres-hub \
-  -n "${POSTGRES_NAMESPACE}" -o jsonpath='{.spec.host}')"
-[[ -n "${HUB_PASS}" && -n "${ROUTE_HOST}" ]] \
-  || die "hub postgres-creds or postgres-hub Route not found"
+  -n "${HUB_PG_NS}" -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)"
+
+IFS='|' read -r ENDPOINT_TYPE LB_HOST LB_PORT <<< "$(hub_postgres_external_endpoint "${HUB_KUBECONFIG}" "${HUB_PG_NS}")"
+[[ -n "${HUB_PASS}" && -n "${LB_HOST}" && -n "${LB_PORT}" ]] \
+  || die "hub postgres credentials or external endpoint not ready"
 
 ENCODED="$(urlencode_password "${HUB_PASS}")"
-EXTERNAL_URL="postgresql://maas:${ENCODED}@${ROUTE_HOST}:443/maas?sslmode=disable"
+EXTERNAL_URL="postgresql://maas:${ENCODED}@${LB_HOST}:${LB_PORT}/maas?sslmode=disable"
 
-log "Applying maas-db-config on client (host=${ROUTE_HOST})..."
+log "Applying maas-db-config on client (${ENDPOINT_TYPE}=${LB_HOST}:${LB_PORT})..."
 export KUBECONFIG="${CLIENT_KUBECONFIG}"
 create_maas_db_config "${APP_NAMESPACE}" "${EXTERNAL_URL}"
 restart_maas_api
@@ -59,8 +60,8 @@ if [[ "${TEST_CONNECTION}" == true ]]; then
     --restart=Never \
     -n "${APP_NAMESPACE}" \
     --command -- \
-    bash -lc "PGPASSWORD='${HUB_PASS}' pg_isready -h '${ROUTE_HOST}' -p 443 -U maas -d maas" \
-    || warn "pg_isready failed — check network/firewall to hub Route"
+    bash -lc "PGPASSWORD='${HUB_PASS}' pg_isready -h '${LB_HOST}' -p ${LB_PORT} -U maas -d maas" \
+    || warn "pg_isready failed — check network/firewall to hub postgres endpoint"
   oc delete pod -n "${APP_NAMESPACE}" -l run=pg-test --ignore-not-found >/dev/null 2>&1 || true
 fi
 

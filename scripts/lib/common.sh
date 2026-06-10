@@ -112,6 +112,48 @@ urlencode_password() {
   printf '%s' "${password}" | od -An -tx1 | tr -d ' \n' | sed 's/../%&/g'
 }
 
+find_hub_postgres_namespace() {
+  local kubeconfig="${1:-${KUBECONFIG:-}}"
+  local ns
+  for ns in "${POSTGRES_NAMESPACE}" redhat-ods-applications; do
+    if KUBECONFIG="${kubeconfig}" oc get secret postgres-creds -n "${ns}" >/dev/null 2>&1; then
+      if [[ "${ns}" != "${POSTGRES_NAMESPACE}" ]]; then
+        warn "Using legacy hub postgres in ${ns} (expected ${POSTGRES_NAMESPACE}). Run apply-hub-postgres.sh on the hub to migrate."
+      fi
+      printf '%s' "${ns}"
+      return 0
+    fi
+  done
+  die "hub postgres-creds not found in ${POSTGRES_NAMESPACE} or redhat-ods-applications — run apply-hub-postgres.sh on the hub"
+}
+
+# Prints: lb|HOST|PORT or route|HOST|PORT
+hub_postgres_external_endpoint() {
+  local kubeconfig=$1
+  local ns=$2
+  local host
+
+  host="$(KUBECONFIG="${kubeconfig}" oc get svc postgres -n "${ns}" \
+    -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
+  if [[ -z "${host}" ]]; then
+    host="$(KUBECONFIG="${kubeconfig}" oc get svc postgres -n "${ns}" \
+      -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+  fi
+  if [[ -n "${host}" ]]; then
+    printf 'lb|%s|5432' "${host}"
+    return 0
+  fi
+
+  host="$(KUBECONFIG="${kubeconfig}" oc get route postgres-hub -n "${ns}" \
+    -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+  if [[ -n "${host}" ]]; then
+    printf 'route|%s|443' "${host}"
+    return 0
+  fi
+
+  die "hub postgres external endpoint not found (LoadBalancer or postgres-hub Route) in namespace ${ns}"
+}
+
 create_maas_db_config() {
   local namespace=$1
   local db_url=$2

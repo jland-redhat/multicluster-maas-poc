@@ -76,6 +76,7 @@ metadata:
     app: postgres
     app.kubernetes.io/part-of: maas-multicluster-poc
 spec:
+  type: LoadBalancer
   selector:
     app: postgres
   ports:

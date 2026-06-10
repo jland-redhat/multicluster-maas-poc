@@ -12,7 +12,7 @@ usage() {
   cat <<'EOF'
 Usage: apply-hub-postgres.sh [--kubeconfig PATH]
 
-Deploys ephemeral PostgreSQL, a TCP passthrough Route (postgres-hub), and the
+Deploys ephemeral PostgreSQL with LoadBalancer service and the
 in-cluster maas-db-config Secret for hub minting.
 EOF
 }
@@ -38,9 +38,12 @@ ENCODED="$(urlencode_password "${PASS}")"
 DB_URL="postgresql://maas:${ENCODED}@postgres.${POSTGRES_NAMESPACE}.svc:5432/maas?sslmode=disable"
 create_maas_db_config "${APP_NAMESPACE}" "${DB_URL}"
 
-ROUTE_HOST="$(oc get route postgres-hub -n "${POSTGRES_NAMESPACE}" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+IFS='|' read -r ENDPOINT_TYPE EXT_HOST EXT_PORT <<< "$(hub_postgres_external_endpoint "${KUBECONFIG}" "${POSTGRES_NAMESPACE}")"
+
 log "Hub PostgreSQL ready."
 log "  In-cluster URL: postgres.${POSTGRES_NAMESPACE}.svc:5432"
-if [[ -n "${ROUTE_HOST}" ]]; then
-  log "  External Route: ${ROUTE_HOST}:443 (passthrough, sslmode=disable)"
+if [[ -n "${EXT_HOST}" ]]; then
+  log "  External ${ENDPOINT_TYPE}: ${EXT_HOST}:${EXT_PORT} (sslmode=disable)"
+else
+  warn "External postgres endpoint not ready yet (LoadBalancer or Route)"
 fi

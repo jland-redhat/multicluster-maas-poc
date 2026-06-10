@@ -86,26 +86,86 @@ helm_gitops() {
 }
 
 # Phase 1: operator Subscription only (Application CRD does not exist yet).
-helm_gitops false
+ensure_gitops_operator_group() {
+  log "Ensuring GitOps OperatorGroup uses AllNamespaces..."
+  oc create namespace "${GITOPS_OPERATOR_NS}" --dry-run=client -o yaml | oc apply -f -
+  oc apply -f - <<EOF
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: openshift-gitops-operator-group
+  namespace: ${GITOPS_OPERATOR_NS}
+spec:
+  upgradeStrategy: Default
+EOF
+  # Helm three-way merge keeps stale targetNamespaces on upgrade; GitOps rejects OwnNamespace.
+  if oc get og openshift-gitops-operator-group -n "${GITOPS_OPERATOR_NS}" \
+    -o jsonpath='{.spec.targetNamespaces}' 2>/dev/null | grep -q .; then
+    warn "Removing targetNamespaces from GitOps OperatorGroup (OwnNamespace unsupported)."
+    oc patch og openshift-gitops-operator-group -n "${GITOPS_OPERATOR_NS}" --type=json \
+      -p='[{"op": "remove", "path": "/spec/targetNamespaces"}]'
+  fi
+}
 
-# A prior chart version scoped the OG to its own namespace (OwnNamespace), which GitOps rejects.
-recover_gitops_operator() {
-  local csv phase reason
+reset_gitops_csv_if_stuck() {
+  local csv phase reason bad_og
   csv="$(oc get csv -n "${GITOPS_OPERATOR_NS}" -o jsonpath='{range .items[?(@.spec.displayName=="Red Hat OpenShift GitOps")]}{.metadata.name}{"\n"}{end}' 2>/dev/null | head -1 || true)"
-  [[ -n "${csv}" ]] || return 0
+  [[ -n "${csv}" ]] || return 1
+
   phase="$(oc get "csv/${csv}" -n "${GITOPS_OPERATOR_NS}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
   reason="$(oc get "csv/${csv}" -n "${GITOPS_OPERATOR_NS}" -o jsonpath='{.status.reason}' 2>/dev/null || true)"
-  if [[ "${phase}" == "Failed" && "${reason}" == "UnsupportedOperatorGroup" ]]; then
-    warn "Removing failed GitOps CSV (${reason}); retrying after OperatorGroup fix."
+  bad_og="$(oc get "csv/${csv}" -n "${GITOPS_OPERATOR_NS}" -o jsonpath='{range .status.conditions[?(@.reason=="UnsupportedOperatorGroup")]}{.reason}{"\n"}{end}' 2>/dev/null | head -1 || true)"
+
+  # Succeeded CSVs may retain old UnsupportedOperatorGroup conditions in status history.
+  if [[ "${phase}" == "Succeeded" ]]; then
+    return 1
+  fi
+
+  if [[ "${reason}" == "UnsupportedOperatorGroup" ]] \
+    || { [[ -n "${bad_og}" ]] && [[ "${phase}" != "Succeeded" ]]; }; then
+    warn "Resetting stuck GitOps CSV ${csv} (${phase}/${reason:-unknown})."
     oc delete "csv/${csv}" -n "${GITOPS_OPERATOR_NS}" --wait=true
     while IFS= read -r ip; do
       [[ -n "${ip}" ]] || continue
       oc delete installplan "${ip}" -n "${GITOPS_OPERATOR_NS}" --wait=true 2>/dev/null || true
     done < <(oc get installplan -n "${GITOPS_OPERATOR_NS}" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+    if oc get subscription "${GITOPS_SUB}" -n "${GITOPS_OPERATOR_NS}" >/dev/null 2>&1; then
+      warn "Recreating GitOps subscription after CSV reset."
+      oc delete subscription "${GITOPS_SUB}" -n "${GITOPS_OPERATOR_NS}" --wait=true
+    fi
+    return 0
   fi
+  return 1
 }
 
-recover_gitops_operator
+repair_gitops_subscription() {
+  if ! oc get subscription "${GITOPS_SUB}" -n "${GITOPS_OPERATOR_NS}" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  local state missing installed_csv
+  state="$(oc get subscription "${GITOPS_SUB}" -n "${GITOPS_OPERATOR_NS}" -o jsonpath='{.status.state}' 2>/dev/null || true)"
+  missing="$(oc get subscription "${GITOPS_SUB}" -n "${GITOPS_OPERATOR_NS}" \
+    -o jsonpath='{.status.conditions[?(@.type=="InstallPlanMissing")].status}' 2>/dev/null || true)"
+  installed_csv="$(oc get subscription "${GITOPS_SUB}" -n "${GITOPS_OPERATOR_NS}" \
+    -o jsonpath='{.status.installedCSV}' 2>/dev/null || true)"
+
+  if [[ "${missing}" == "True" ]] \
+    || [[ "${state}" == "UpgradePending" && "${missing}" == "True" ]] \
+    || { [[ -n "${installed_csv}" ]] && ! oc get "csv/${installed_csv}" -n "${GITOPS_OPERATOR_NS}" >/dev/null 2>&1; }; then
+    warn "Recreating GitOps subscription (state=${state:-unknown}, InstallPlanMissing=${missing:-false})."
+    oc delete subscription "${GITOPS_SUB}" -n "${GITOPS_OPERATOR_NS}" --wait=true
+    return 0
+  fi
+  return 1
+}
+
+ensure_gitops_operator_group
+helm_gitops false
+ensure_gitops_operator_group
+if reset_gitops_csv_if_stuck || repair_gitops_subscription; then
+  helm_gitops false
+fi
 
 log "Waiting for OpenShift GitOps subscription..."
 if ! oc wait --for=jsonpath='{.status.state}'=AtLatestKnown \

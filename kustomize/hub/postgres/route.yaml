@@ -1,4 +1,5 @@
-# TCP passthrough Route — clients connect to host:443 with sslmode=disable.
+# Passthrough Route — PostgreSQL handles TLS, route passes encrypted traffic.
+# Clients connect to host:443 with sslmode=require (or disable for self-signed).
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
