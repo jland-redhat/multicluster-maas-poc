@@ -13,6 +13,30 @@ Proof-of-concept for **shared API key storage** across three OpenShift clusters 
 
 See [SPEC.md](SPEC.md) for design decisions.
 
+## Architecture
+
+```mermaid
+flowchart TB
+  subgraph Hub["Hub cluster"]
+    PG[(PostgreSQL)]
+    HubMaaS[MaaS]
+    HubMaaS --> PG
+  end
+
+  subgraph Client1["Client 1 cluster"]
+    C1MaaS[MaaS]
+  end
+
+  subgraph Client2["Client 2 cluster"]
+    C2MaaS[MaaS]
+  end
+
+  C1MaaS -->|validate API keys| PG
+  C2MaaS -->|validate API keys| PG
+```
+
+All three clusters run MaaS. PostgreSQL lives on the hub; client clusters validate keys against it.
+
 ---
 
 ## Prerequisites
