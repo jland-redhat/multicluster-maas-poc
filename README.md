@@ -5,7 +5,7 @@ Proof-of-concept for **shared API key storage** across three OpenShift clusters 
 | Cluster | Role |
 |---------|------|
 | **hub** | PostgreSQL + key minting + same simulator models/subscriptions as clients |
-| **client1**, **client2** | Inference + validation-only maas-api, shared hub DB, key-mgmt blocked |
+| **client1**, **client2** | Inference + maas-api, shared hub DB for API key validation |
 
 **What this proves:** mint an API key on the hub → use it for inference on client clusters when subscription names match.
 
@@ -35,7 +35,9 @@ flowchart TB
   C2MaaS -->|validate API keys| PG
 ```
 
-All three clusters run MaaS. PostgreSQL lives on the hub; client clusters validate keys against it.
+All three clusters run MaaS. PostgreSQL lives on the hub; client clusters validate **MaaS API keys** (`sk-oai-*`) against it.
+
+**Authentication:** OpenShift tokens from `oc whoami -t` are **cluster-local** — use the kubeconfig for the cluster you are calling (hub token on hub, client token on each client). Only **minted MaaS API keys** are shared across clusters via hub PostgreSQL.
 
 ---
 
@@ -179,7 +181,6 @@ when using `install-hub.sh` or `bootstrap-gitops.sh` (default git repo is this p
   --test-connection
 ./scripts/enable-maas.sh --kubeconfig "${CLIENT_KUBECONFIG}"
 ./scripts/apply-models.sh --kubeconfig "${CLIENT_KUBECONFIG}"
-./scripts/disable-key-management.sh --kubeconfig "${CLIENT_KUBECONFIG}"
 ```
 
 ### Phase 3 — Validate
@@ -201,13 +202,13 @@ Identical on every client cluster (vendored from maas-billing samples):
 | free | `facebook-opt-125m-simulated` | `simulator-subscription` | `system:authenticated` |
 | premium | `premium-simulated-simulated-premium` | `premium-simulator-subscription` | `premium-user` |
 
-Mint on the hub with explicit subscription:
+Mint on the hub with the **hub** OpenShift token (stored key is shared to clients via PostgreSQL):
 
 ```bash
 export KUBECONFIG="${HUB_KUBECONFIG}"
 HOST="maas.$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')"
 curl -skS -X POST \
-  -H "Authorization: Bearer $(oc whoami -t)" \
+  -H "Authorization: Bearer $(KUBECONFIG="${HUB_KUBECONFIG}" oc whoami -t)" \
   -H "Content-Type: application/json" \
   -d '{"name":"demo","subscription":"simulator-subscription","expiresIn":"2h"}' \
   "https://${HOST}/maas-api/v1/api-keys"
@@ -225,7 +226,7 @@ multicluster-poc/
 ├── kustomize/
 │   ├── hub/postgres/          # Hub DB + Route
 │   ├── common/models/         # Simulator bundles (hub + clients)
-│   └── client/disable-key-management/
+│   └── client/argocd-apps/
 ├── samples/                   # Vendored model/MaaS YAML
 └── scripts/                   # Install, sync, validate
 ```
@@ -240,24 +241,11 @@ multicluster-poc/
 
 ---
 
-## Client key-management lockdown
-
-`disable-key-management.sh` applies an RHCL/Kuadrant `AuthPolicy` denying all `/maas-api/v1/api-keys*` paths on the gateway.
-
-Blocked: mint, search, revoke, bulk-revoke, per-key CRUD.
-
-Not blocked: `/maas-api/health`, `/v1/models`, internal Authorino validation to maas-api.
-
-Re-run the script if the operator reconciles and removes the deny policy.
-
----
-
 ## Troubleshooting
 
 | Symptom | Check |
 |---------|-------|
 | maas-api CrashLoop | `maas-db-config` exists; client can reach hub Route:443 |
-| Mint works on client | Re-run `disable-key-management.sh` |
 | Inference 403 | Subscription name on key matches client `MaaSSubscription`; model Ready |
 | Gateway not Programmed | Re-run `setup-gateway.sh`; check RHCL/Authorino in `kuadrant-system` |
 | RHOAI not ready | `oc get dscinitialization,datasciencecluster` |

@@ -86,25 +86,47 @@ helm_gitops() {
 }
 
 # Phase 1: operator Subscription only (Application CRD does not exist yet).
-ensure_gitops_operator_group() {
-  log "Ensuring GitOps OperatorGroup uses AllNamespaces..."
+adopt_resource_for_helm() {
+  local kind=$1
+  local name=$2
+  local ns=$3
+
+  if ! oc get "${kind}" "${name}" -n "${ns}" >/dev/null 2>&1; then
+    return 0
+  fi
+  if [[ "$(oc get "${kind}" "${name}" -n "${ns}" \
+    -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || true)" == "Helm" ]]; then
+    return 0
+  fi
+
+  warn "Adopting ${kind}/${name} into Helm release maas-poc-gitops."
+  oc annotate "${kind}" "${name}" -n "${ns}" \
+    meta.helm.sh/release-name=maas-poc-gitops \
+    meta.helm.sh/release-namespace="${GITOPS_HELM_NS}" \
+    --overwrite
+  oc label "${kind}" "${name}" -n "${ns}" app.kubernetes.io/managed-by=Helm --overwrite
+}
+
+prepare_gitops_helm_install() {
   oc create namespace "${GITOPS_OPERATOR_NS}" --dry-run=client -o yaml | oc apply -f -
-  oc apply -f - <<EOF
-apiVersion: operators.coreos.com/v1
-kind: OperatorGroup
-metadata:
-  name: openshift-gitops-operator-group
-  namespace: ${GITOPS_OPERATOR_NS}
-spec:
-  upgradeStrategy: Default
-EOF
-  # Helm three-way merge keeps stale targetNamespaces on upgrade; GitOps rejects OwnNamespace.
+  # Prior runs applied the OperatorGroup with oc before Helm existed; adopt so helm upgrade works.
+  adopt_resource_for_helm operatorgroup openshift-gitops-operator-group "${GITOPS_OPERATOR_NS}"
+  adopt_resource_for_helm subscription "${GITOPS_SUB}" "${GITOPS_OPERATOR_NS}"
+}
+
+strip_gitops_operator_group_own_namespace() {
   if oc get og openshift-gitops-operator-group -n "${GITOPS_OPERATOR_NS}" \
     -o jsonpath='{.spec.targetNamespaces}' 2>/dev/null | grep -q .; then
     warn "Removing targetNamespaces from GitOps OperatorGroup (OwnNamespace unsupported)."
     oc patch og openshift-gitops-operator-group -n "${GITOPS_OPERATOR_NS}" --type=json \
       -p='[{"op": "remove", "path": "/spec/targetNamespaces"}]'
   fi
+}
+
+helm_gitops_phase1() {
+  prepare_gitops_helm_install
+  helm_gitops false
+  strip_gitops_operator_group_own_namespace
 }
 
 reset_gitops_csv_if_stuck() {
@@ -160,11 +182,9 @@ repair_gitops_subscription() {
   return 1
 }
 
-ensure_gitops_operator_group
-helm_gitops false
-ensure_gitops_operator_group
+helm_gitops_phase1
 if reset_gitops_csv_if_stuck || repair_gitops_subscription; then
-  helm_gitops false
+  helm_gitops_phase1
 fi
 
 log "Waiting for OpenShift GitOps subscription..."
@@ -189,6 +209,7 @@ else
   wait_for_crd applications.argoproj.io 600
   log "Creating Argo CD Applications..."
   helm_gitops true
+  strip_gitops_operator_group_own_namespace
   log "Argo CD Applications configured for ${HELM_ROLE} cluster (repo=${GIT_REPO})."
   log "  Hub: maas-poc-hub-postgres, maas-poc-models"
   log "  Client: maas-poc-models"

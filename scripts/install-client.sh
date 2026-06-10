@@ -22,8 +22,8 @@ Usage: install-client.sh \
          [--skip-gitops-apps]
 
 Runs the client install sequence:
-  install-rhoai -> install-rhcl -> bootstrap-gitops -> setup-gateway -> enable-maas (needs DB) ->
-  sync-hub-db -> apply-models -> disable-key-management
+  install-rhoai -> install-rhcl -> bootstrap-gitops -> setup-gateway ->
+  sync-hub-db -> enable-maas -> apply-models
 
 Note: enable-maas requires maas-db-config. Run sync-hub-db-to-clients.sh before
 enable-maas if following steps manually. This script syncs DB before enable-maas
@@ -63,6 +63,5 @@ GITOPS_ARGS=(--cluster "${CLUSTER_NAME}" --git-repo "${GIT_REPO}")
 
 "${SCRIPT_DIR}/enable-maas.sh" "${KC_ARGS[@]}"
 "${SCRIPT_DIR}/apply-models.sh" "${KC_ARGS[@]}"
-"${SCRIPT_DIR}/disable-key-management.sh" "${KC_ARGS[@]}"
 
 echo "[multicluster-poc] Client install complete."

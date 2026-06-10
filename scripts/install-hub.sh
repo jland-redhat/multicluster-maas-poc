@@ -18,8 +18,7 @@ Runs the hub install sequence on a fresh OpenShift cluster:
   setup-gateway -> enable-maas -> apply-models
 
 Hub gets the same simulator models, MaaSSubscriptions, and MaaSAuthPolicies as
-clients (shared subscription names for cross-cluster API keys). Key minting stays
-enabled on the hub (disable-key-management is client-only).
+clients (shared subscription names for cross-cluster API keys).
 EOF
 }
 

@@ -12,7 +12,7 @@ GATEWAY_NAMESPACE="${GATEWAY_NAMESPACE:-openshift-ingress}"
 DEFAULT_GIT_REPO="${DEFAULT_GIT_REPO:-https://github.com/jland-redhat/multicluster-maas-poc.git}"
 DEFAULT_GIT_REVISION="${DEFAULT_GIT_REVISION:-main}"
 
-log() { printf '[multicluster-poc] %s\n' "$*"; }
+log() { printf '[multicluster-poc] %s\n' "$*" >&2; }
 warn() { printf '[multicluster-poc] WARN: %s\n' "$*" >&2; }
 die() { printf '[multicluster-poc] ERROR: %s\n' "$*" >&2; exit 1; }
 
@@ -28,6 +28,16 @@ setup_kubeconfig() {
   fi
   require_cmd oc
   oc whoami >/dev/null 2>&1 || die "not logged in (oc login required)"
+}
+
+# OpenShift tokens are cluster-scoped — always pass the target cluster kubeconfig.
+# MaaS API keys (sk-oai-*) are the only credentials shared via hub PostgreSQL.
+cluster_openshift_token() {
+  local kubeconfig="${1:?kubeconfig path required}"
+  local token
+  token="$(KUBECONFIG="${kubeconfig}" oc whoami -t 2>/dev/null || true)"
+  [[ -n "${token}" ]] || die "OpenShift token unavailable for ${kubeconfig} (oc login --kubeconfig=... required)"
+  printf '%s' "${token}"
 }
 
 wait_for_csv() {

@@ -5,7 +5,7 @@
 Demonstrate **shared API key storage** across OpenShift clusters:
 
 - **Hub** — PostgreSQL + key minting only (no models).
-- **Client 1 & Client 2** — full inference stack, two simulator models each, **validation-only** maas-api (shared hub DB), **no key management** via the gateway.
+- **Client 1 & Client 2** — full inference stack, two simulator models each, maas-api with shared hub DB for API key validation.
 
 **Success criteria:** mint a key on the hub → use it for inference on both clients, assuming **identical subscription names** on every cluster.
 
@@ -21,7 +21,6 @@ Demonstrate **shared API key storage** across OpenShift clusters:
 | Postgres durability | Ephemeral (`emptyDir`) — demo only |
 | Git hosting | Local folder in this repo for now |
 | Templating | **Helm** for GitOps bootstrap + Postgres; **Kustomize** for models, policies, Argo apps |
-| Client key APIs | Block **all public key-management endpoints** on clients |
 | Identity | OpenShift `kubernetesTokenReview` only — no Keycloak |
 | Subscriptions | **Same names on every cluster** (`simulator-subscription`, `premium-simulator-subscription`) |
 | Starting point | **Three blank clusters** — README defines install order |
@@ -43,8 +42,6 @@ multicluster-poc/
 │   │   ├── postgres/
 │   │   └── argocd-apps/
 │   ├── client/
-│   │   ├── models/
-│   │   ├── disable-key-management/
 │   │   └── argocd-apps/
 │   └── common/
 │       └── datasciencecluster.yaml
@@ -59,7 +56,6 @@ multicluster-poc/
     ├── apply-client-models.sh
     ├── bootstrap-gitops.sh
     ├── sync-hub-db-to-clients.sh
-    ├── disable-key-management.sh
     ├── validate-poc.sh
     ├── install-hub.sh
     └── install-client.sh

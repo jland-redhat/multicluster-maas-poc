@@ -16,9 +16,10 @@ Usage: validate-poc.sh \
          --client-kubeconfig PATH
 
 Checks:
-  1. Hub can mint an API key (OpenShift token)
-  2. Client rejects mint/search key endpoints
-  3. Hub-minted key reaches maas-api health on client (optional curl checks)
+  1. Hub maas-api health (hub OpenShift token)
+  2. Client maas-api health (client OpenShift token)
+  3. Hub can mint a MaaS API key (hub OpenShift token; key stored in hub PostgreSQL)
+  4. Hub-minted MaaS API key works for inference on the client
 EOF
 }
 
@@ -41,19 +42,22 @@ check_health() {
   local kubeconfig=$1
   local label=$2
   export KUBECONFIG="${kubeconfig}"
-  local base
+  local base token code
   base="$(maas_api_base_url)"
-  log "${label}: GET ${base}/health"
-  curl -skS -f "${base}/health" >/dev/null \
-    || die "${label} maas-api health check failed"
+  token="$(cluster_openshift_token "${kubeconfig}")"
+  log "${label}: GET ${base}/health (cluster OpenShift token)"
+  code="$(curl -skS -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer ${token}" \
+    "${base}/health" 2>/dev/null || echo "000")"
+  [[ "${code}" == "200" ]] \
+    || die "${label} maas-api health check failed (HTTP ${code})"
 }
 
 mint_key_on_hub() {
   export KUBECONFIG="${HUB_KUBECONFIG}"
   local base token response key
   base="$(maas_api_base_url)"
-  token="$(oc whoami -t)"
-  [[ -n "${token}" ]] || die "hub: oc whoami -t failed"
+  token="$(cluster_openshift_token "${HUB_KUBECONFIG}")"
 
   log "Hub: minting API key (subscription=simulator-subscription)..."
   response="$(curl -skS -X POST \
@@ -67,58 +71,45 @@ mint_key_on_hub() {
   printf '%s' "${key}"
 }
 
-client_denies_key_apis() {
-  export KUBECONFIG="${CLIENT_KUBECONFIG}"
-  local base token code
-  base="$(maas_api_base_url)"
-  token="$(oc whoami -t)"
-
-  log "Client: POST /v1/api-keys should be denied..."
-  code="$(curl -skS -o /dev/null -w '%{http_code}' -X POST \
-    -H "Authorization: Bearer ${token}" \
-    -H "Content-Type: application/json" \
-    -d '{"name":"should-fail"}' \
-    "${base}/v1/api-keys")"
-  [[ "${code}" == "403" || "${code}" == "401" || "${code}" == "404" ]] \
-    || die "expected client mint to be denied, got HTTP ${code}"
-
-  log "Client: GET /v1/api-keys/search should be denied..."
-  code="$(curl -skS -o /dev/null -w '%{http_code}' \
-    -H "Authorization: Bearer ${token}" \
-    "${base}/v1/api-keys/search")"
-  [[ "${code}" == "403" || "${code}" == "401" || "${code}" == "404" ]] \
-    || die "expected client search to be denied, got HTTP ${code}"
-}
-
 inference_with_key() {
   local kubeconfig=$1
   local label=$2
   local key=$3
   export KUBECONFIG="${kubeconfig}"
-  local host code
-  host="$(cluster_ingress_host)"
-  local url="https://${host}/llm/facebook-opt-125m-simulated/v1/chat/completions"
-  log "${label}: inference smoke via ${url}..."
-  code="$(curl -skS -o /dev/null -w '%{http_code}' -X POST \
+  local base model_name model_url code response payload
+  base="$(maas_api_base_url)"
+
+  log "${label}: listing models via ${base}/v1/models..."
+  response="$(curl -skS \
     -H "Authorization: Bearer ${key}" \
     -H "Content-Type: application/json" \
-    -d '{"model":"facebook-opt-125m-simulated","messages":[{"role":"user","content":"hi"}],"max_tokens":5}' \
-    "${url}" 2>/dev/null || echo "000")"
-  if [[ "${code}" == "000" ]]; then
-    url="http://${host}/llm/facebook-opt-125m-simulated/v1/chat/completions"
-    code="$(curl -skS -o /dev/null -w '%{http_code}' -X POST \
-      -H "Authorization: Bearer ${key}" \
-      -H "Content-Type: application/json" \
-      -d '{"model":"facebook-opt-125m-simulated","messages":[{"role":"user","content":"hi"}],"max_tokens":5}' \
-      "${url}")"
-  fi
-  [[ "${code}" == "200" ]] || warn "${label} inference returned HTTP ${code} (model path may differ until LLMIS is Ready)"
+    "${base}/v1/models")"
+  model_name="$(printf '%s' "${response}" | jq -r '.data[0].id // empty')"
+  model_url="$(printf '%s' "${response}" | jq -r '.data[0].url // empty')"
+  [[ -n "${model_name}" && -n "${model_url}" ]] \
+    || die "${label} could not resolve model from /v1/models: ${response}"
+
+  log "${label}: inference smoke via ${model_url}/v1/chat/completions (model=${model_name})..."
+  payload="$(jq -nc --arg model "${model_name}" \
+    '{model: $model, messages: [{role: "user", content: "hi"}], max_tokens: 5}')"
+  response="$(curl -skS -X POST \
+    -H "Authorization: Bearer ${key}" \
+    -H "Content-Type: application/json" \
+    -d "${payload}" \
+    -w $'\nHTTPSTATUS:%{http_code}' \
+    "${model_url}/v1/chat/completions" || true)"
+  code="${response##*HTTPSTATUS:}"
+  response="${response%HTTPSTATUS:*}"
+  response="${response%$'\n'}"
+  [[ "${code}" == "200" ]] \
+    || die "${label} inference failed (HTTP ${code:-unknown}): ${response}"
+  log "${label} inference response:"
+  printf '%s' "${response}" | jq .
 }
 
 log "=== Multicluster PoC validation ==="
 check_health "${HUB_KUBECONFIG}" "Hub"
 check_health "${CLIENT_KUBECONFIG}" "Client"
 API_KEY="$(mint_key_on_hub)"
-client_denies_key_apis
 inference_with_key "${CLIENT_KUBECONFIG}" "Client" "${API_KEY}"
 log "Validation complete."

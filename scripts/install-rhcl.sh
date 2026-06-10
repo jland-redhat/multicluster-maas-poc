@@ -118,9 +118,12 @@ EOF
 }
 
 install_rhcl() {
+  local rhcl_fresh_install=false
+
   if oc get subscription "${RHCL_SUB}" -n "${RHCL_NS}" >/dev/null 2>&1; then
     log "RHCL operator subscription already exists."
   else
+    rhcl_fresh_install=true
     log "Installing Red Hat Connectivity Link operator..."
     oc apply -f - <<EOF
 apiVersion: v1
@@ -158,6 +161,10 @@ EOF
   wait_for_csv "${rhcl_csv}" "${RHCL_NS}" 600
 
   if ! oc get kuadrant kuadrant -n "${RHCL_NS}" >/dev/null 2>&1; then
+    if [[ "${rhcl_fresh_install}" == true ]]; then
+      log "Pausing 10s for Kuadrant CRD registration before creating Kuadrant instance..."
+      sleep 10
+    fi
     log "Creating Kuadrant instance..."
     oc apply -f - <<EOF
 apiVersion: kuadrant.io/v1beta1
