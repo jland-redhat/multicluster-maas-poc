@@ -27,6 +27,11 @@ spec:
           - facebook/opt-125m
           - --mode
           - random
+          # ~10s streamed decode at max_tokens=256: 1s TTFT + 255 * 35ms
+          - --time-to-first-token
+          - "1s"
+          - --inter-token-latency
+          - "300ms"
           - --no-mm-encoder-only
           - --ssl-certfile
           - /var/run/kserve/tls/tls.crt
